@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Trivia Challenge</title>
+<style>
+:root{--bg:#f4f4f0;--panel:#fff;--text:#1d1d1b;--dim:#6b6b66;--accent:#0b6e6e;--good:#1a7f37;--bad:#c62828;--warn:#9a6700;--border:#d8d8d2;color-scheme:light;
+box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0e1012;--panel:#171a1d;--text:#e8e8e3;--dim:#9a9a93;--accent:#4fd1c5;--good:#5fd38a;--bad:#ff7b72;--warn:#e3b341;--border:#2c3136;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#0e1012;--panel:#171a1d;--text:#e8e8e3;--dim:#9a9a93;--accent:#4fd1c5;--good:#5fd38a;--bad:#ff7b72;--warn:#e3b341;--border:#2c3136;color-scheme:dark}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:16px/1.5 ui-monospace,"SF Mono",Menlo,Consolas,monospace;display:flex;justify-content:center;padding:20px 14px}
+main{width:100%;max-width:640px;background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:22px}
+h1{font-size:1.25rem;margin:0 0 4px;color:var(--accent)}
+.dim{color:var(--dim)}.good{color:var(--good)}.bad{color:var(--bad)}.warn{color:var(--warn)}
+.bar{height:8px;background:var(--border);border-radius:4px;overflow:hidden;margin:6px 0 14px}
+.bar>i{display:block;height:100%;width:100%;background:var(--accent);transition:width .1s linear}
+.status{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px;font-size:.9rem}
+.q{font-size:1.1rem;margin:10px 0 14px}
+button,select{font:inherit;color:var(--text);background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:10px 12px;cursor:pointer}
+button:hover:not(:disabled){border-color:var(--accent)}
+.opt{display:block;width:100%;text-align:left;margin-bottom:8px}
+.opt.right{border-color:var(--good);color:var(--good)}.opt.wrong{border-color:var(--bad);color:var(--bad)}
+.primary{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:700}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:8px 0}
+ul{padding-left:0;list-style:none}
+</style>
+</head>
+<body>
+<main>
+  <h1>TRIVIA CHALLENGE</h1>
+  <div class="dim">A timed quiz. Answer with the buttons or the A–D / 1–4 keys.</div>
+  <div id="screen"></div>
+</main>
+<script>
+'use strict';
+const POINTS = 10, MAX_BONUS = 5, WARN = 5;
+const BANK = [
+  {category:'JavaScript',question:'Which keyword declares a block-scoped variable that can be reassigned?',options:['var','let','const','static'],answer:1},
+  {category:'JavaScript',question:'What does Array.prototype.map() return?',options:['A single value','The original array','A new array','undefined'],answer:2},
+  {category:'JavaScript',question:'What is the result of typeof null?',options:['“null”','“object”','“undefined”','“number”'],answer:1},
+  {category:'JavaScript',question:'Which function schedules code to run once after a delay?',options:['setInterval','setImmediate','setTimeout','requestDelay'],answer:2},
+  {category:'Science',question:'What is the chemical symbol for gold?',options:['Ag','Au','Gd','Go'],answer:1},
+  {category:'Science',question:'Which planet is known as the Red Planet?',options:['Venus','Jupiter','Mars','Mercury'],answer:2},
+  {category:'Geography',question:'What is the capital city of Kenya?',options:['Mombasa','Nairobi','Kisumu','Nakuru'],answer:1},
+  {category:'Geography',question:'Which is the longest river in Africa?',options:['Congo','Niger','Zambezi','Nile'],answer:3},
+  {category:'History',question:'In which year did the first human land on the Moon?',options:['1965','1969','1972','1975'],answer:1},
+  {category:'General',question:'How many continents are there on Earth?',options:['5','6','7','8'],answer:2},
+  {category:'General',question:'Which ocean is the largest by area?',options:['Atlantic','Indian','Arctic','Pacific'],answer:3},
+  {category:'Technology',question:'What does CSS stand for?',options:['Computer Style Sheets','Cascading Style Sheets','Creative Style Syntax','Colorful Style Sheets'],answer:1}
+];
+
+// ---- Pure helpers (same logic as the CLI version) ----
+function shuffle(items){const c=[...items];for(let i=c.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[c[i],c[j]]=[c[j],c[i]];}return c;}
+function parseAnswer(input,count){
+  const t=String(input).trim().toUpperCase(),l=t.charCodeAt(0)-65,n=Number(t)-1;
+  if(t.length===1&&l>=0&&l<count)return l;
+  if(Number.isInteger(n)&&n>=0&&n<count)return n;
+  return -1;
+}
+const speedBonus=(taken,allowed)=>Math.round(MAX_BONUS*Math.max(0,1-taken/allowed));
+function buildResult(q,choice,taken,allowed){
+  const status=choice===null?'timeout':choice===q.answer?'correct':'incorrect';
+  return {question:q,choice,status,secondsTaken:taken,points:status==='correct'?POINTS+speedBonus(taken,allowed):0};
+}
+function buildSummary(results){
+  const count=s=>results.filter(r=>r.status===s).length,n=results.length,c=count('correct');
+  return {answered:n,correct:c,incorrect:count('incorrect'),timedOut:count('timeout'),
+    score:results.reduce((s,r)=>s+r.points,0),accuracy:n?Math.round(c/n*100):0,
+    averageTime:n?results.reduce((s,r)=>s+r.secondsTaken,0)/n:0};
+}
+function rating(a){
+  if(a===100)return 'Perfect score! Trivia master!';
+  if(a>=80)return 'Excellent work!';
+  if(a>=60)return 'Good job, keep practising!';
+  if(a>=40)return 'Not bad – room to improve.';
+  return 'Keep going, you’ll get there!';
+}
+
+// ---- Game state & UI ----
+const screen=document.getElementById('screen');
+let G=null;
+const letter=i=>String.fromCharCode(65+i);
+
+function showStart(){
+  G=null;
+  screen.innerHTML=`
+    <div class="row"><label>Questions <select id="count"><option>3</option><option selected>5</option><option>8</option><option>12</option></select></label>
+    <label>Seconds per question <select id="qtime"><option>5</option><option>10</option><option selected>15</option><option>20</option></select></label>
+    <label>Game time <select id="gtime"><option value="30">30s</option><option value="60">60s</option><option value="120" selected>120s</option></select></label></div>
+    <div class="dim">Scoring: ${POINTS} pts + up to ${MAX_BONUS} speed bonus.</div>
+    <div class="row"><button class="primary" id="start">Start game</button></div>`;
+  document.getElementById('start').onclick=startGame;
+}
+
+function startGame(){
+  const v=id=>Number(document.getElementById(id).value);
+  G={questions:shuffle(BANK).slice(0,v('count')),qTime:v('qtime'),gameTime:v('gtime'),
+     results:[],index:0,gameStart:Date.now(),open:false,tick:null};
+  showQuestion();
+}
+
+function showQuestion(){
+  const left=G.gameTime-(Date.now()-G.gameStart)/1000;
+  if(left<=0||G.index>=G.questions.length)return finish();
+  const q=G.questions[G.index];
+  G.allowed=Math.min(G.qTime,Math.ceil(left));
+  G.qStart=Date.now();G.open=true;
+  const score=G.results.reduce((s,r)=>s+r.points,0);
+  screen.innerHTML=`
+    <div class="status"><span>Question ${G.index+1}/${G.questions.length} <span class="dim">[${q.category}]</span></span>
+      <span>Score: ${score}</span></div>
+    <div class="bar"><i id="qbar"></i></div>
+    <div class="status dim"><span id="qleft"></span><span id="gleft"></span></div>
+    <p class="q">${q.question}</p>
+    ${q.options.map((o,i)=>`<button class="opt" data-i="${i}">${letter(i)}) ${o}</button>`).join('')}
+    <div id="feedback"></div><div class="row" id="nextrow"></div>`;
+  screen.querySelectorAll('.opt').forEach(b=>b.onclick=()=>answer(Number(b.dataset.i)));
+  G.tick=setInterval(updateClock,100);
+  updateClock();
+}
+
+function updateClock(){
+  const left=G.allowed-(Date.now()-G.qStart)/1000;
+  const gameLeft=Math.max(0,G.gameTime-(Date.now()-G.gameStart)/1000);
+  const bar=document.getElementById('qbar'),txt=document.getElementById('qleft');
+  bar.style.width=Math.max(0,left/G.allowed*100)+'%';
+  txt.textContent='Time left: '+Math.max(0,left).toFixed(1)+'s';
+  txt.className=left<=WARN?'warn':'';
+  document.getElementById('gleft').textContent='Game clock: '+Math.ceil(gameLeft)+'s';
+  if(left<=0)answer(null);
+}
+
+function answer(choice){
+  if(!G||!G.open)return;
+  G.open=false;clearInterval(G.tick);
+  const taken=Math.min(G.allowed,(Date.now()-G.qStart)/1000);
+  const q=G.questions[G.index];
+  const r=buildResult(q,choice,taken,G.allowed);
+  G.results.push(r);
+  screen.querySelectorAll('.opt').forEach((b,i)=>{
+    b.disabled=true;
+    if(i===q.answer)b.classList.add('right');
+    else if(i===choice)b.classList.add('wrong');
+  });
+  const fb=document.getElementById('feedback');
+  const correct=`${letter(q.answer)}) ${q.options[q.answer]}`;
+  fb.innerHTML=r.status==='correct'?`<p class="good">Correct! +${r.points} pts (${taken.toFixed(1)}s)</p>`
+    :r.status==='incorrect'?`<p class="bad">Incorrect. The answer was ${correct}</p>`
+    :`<p class="bad">Time’s up! The answer was ${correct}</p>`;
+  G.index++;
+  const last=G.index>=G.questions.length;
+  document.getElementById('nextrow').innerHTML=`<button class="primary" id="next">${last?'See results':'Next question'}</button>`;
+  document.getElementById('next').onclick=showQuestion;
+}
+
+function finish(){
+  const s=buildSummary(G.results),skipped=G.questions.length-G.results.length;
+  const elapsed=Math.min(G.gameTime,(Date.now()-G.gameStart)/1000);
+  const review=G.results.map((r,i)=>`<li class="${r.status==='correct'?'good':'bad'}">${r.status==='correct'?'OK':'X '} ${i+1}. ${r.question.question}</li>`).join('');
+  screen.innerHTML=`
+    <h1>GAME OVER</h1><ul>${review}</ul>
+    <div>Score: <b>${s.score}</b> pts</div>
+    <div>Correct: ${s.correct}/${s.answered} (${s.accuracy}%)</div>
+    <div>Incorrect: ${s.incorrect} · Timed out: ${s.timedOut}${skipped?` · Not reached: ${skipped}`:''}</div>
+    <div>Avg. time: ${s.averageTime.toFixed(1)}s · Total: ${elapsed.toFixed(1)}s</div>
+    <p class="warn">${rating(s.accuracy)}</p>
+    <div class="row"><button class="primary" id="again">Play again</button></div>`;
+  document.getElementById('again').onclick=showStart;
+  G=null;
+}
+
+document.addEventListener('keydown',e=>{
+  if(G&&G.open){
+    const c=parseAnswer(e.key,G.questions[G.index].options.length);
+    if(c!==-1)answer(c);
+  }else if(e.key==='Enter'){
+    const b=document.getElementById('next')||document.getElementById('start')||document.getElementById('again');
+    if(b)b.click();
+  }
+});
+
+showStart();
+</script>
+</body>
+</html>
